@@ -43,8 +43,12 @@ class testlink (
   $db_root_password,
   $doc_root       = $testlink::params::doc_root,
   $tarball_url    = $testlink::params::tarball_url,
+  $http_proxy     = false,
   $package_ensure = 'latest',
-  $max_memory     = '2048'
+  $max_memory     = '2048',
+  $manage_apache_user  = true,
+  $manage_apache_group = true,
+  $manage_wget_package = true,
   ) inherits testlink::params {
 
   #Class['testlink'] -> Testlink::Instance<| |>
@@ -53,18 +57,20 @@ class testlink (
   $tarball_dir              = regsubst($tarball_url, '^.*?/(\d\.\d+).*$', '\1')
   $tarball_name             = regsubst($tarball_url, '^.*?/(testlink-\d\.\d+.*tar\.gz)$', '\1')
   $testlink_dir            = regsubst($tarball_url, '^.*?/(testlink-\d\.\d+\.\d+).*$', '\1')
-  $testlink_install_path   = "/var/www"
+  $testlink_install_path   = '/var/www'
   #$testlink_instance_install_path   = "/var/www"
-  
+
   # Specify dependencies
   Class['mysql::server'] -> Class['testlink']
   #Class['mysql::config'] -> Class['testlink']
-  
-  class { 'apache': 
-    mpm_module => 'prefork',
+
+  class { 'apache':
+    mpm_module   => 'prefork',
+    manage_user  => $manage_apache_user,
+    manage_group => $manage_apache_group,
   }
   class { 'apache::mod::php': }
-  
+
   # Manages the mysql server package and service by default
   class { 'mysql::server':
     root_password => $db_root_password,
@@ -73,54 +79,62 @@ class testlink (
   class { 'testlink::php': }
 
   package { $testlink::params::packages:
-    ensure  => $package_ensure,
+    ensure => $package_ensure,
   }
   Package[$testlink::params::packages] ~> Service<| title == $testlink::params::apache |>
- 
-  
+
+
   # Download and install testlink from a tarball
-  exec { "get-testlink":
-    cwd       => '/var/www',
-    command   => "/usr/bin/wget ${tarball_url}",
-    creates   => "/var/www/${tarball_name}",
+  if ($http_proxy) {
+    exec { 'get-testlink':
+      cwd         => '/var/www',
+      environment => ["http_proxy=${http_proxy}"],
+      command     => "/usr/bin/wget ${tarball_url}",
+      creates     => "/var/www/${tarball_name}",
+    }
+  } else {
+    exec { 'get-testlink':
+      cwd         => '/var/www',
+      command     => "/usr/bin/wget ${tarball_url}",
+      creates     => "/var/www/${tarball_name}",
+    }
   }
-    
-  exec { "unpack-testlink":
-    cwd       => '/var/www',
-    command   => "/bin/tar -xvzf ${tarball_name} --strip-components=2",
-    #creates   => $testlink_install_path,
+  exec { 'unpack-testlink':
+    cwd     => '/var/www',
+    command => "/bin/tar -xvzf ${tarball_name} --strip-components=2",
+    #creates => $testlink_install_path,
     require => Exec['get-testlink'],
   }
 
   # Ensure gui/templates_c has right permissions
   file { "${testlink_install_path}/gui/templates_c":
-    ensure => directory,
-    owner  => $testlink::params::apache_user,
-    group  => $testlink::params::apache_user,
-    mode   => '0777',
+    ensure  => directory,
+    owner   => $testlink::params::apache_user,
+    group   => $testlink::params::apache_user,
+    mode    => '0777',
     require => Exec['unpack-testlink'],
   }
 
   # Ensure logs has right permissions
   file { "${testlink_install_path}/logs/":
-    ensure => directory,
-    owner  => $testlink::params::apache_user,
-    group  => $testlink::params::apache_user,
-    mode   => '0755',
+    ensure  => directory,
+    owner   => $testlink::params::apache_user,
+    group   => $testlink::params::apache_user,
+    mode    => '0755',
     require => Exec['unpack-testlink'],
   }
 
   # Ensure upload_area has right permissions
   file { "${testlink_install_path}/upload_area/":
-    ensure => directory,
-    owner  => $testlink::params::apache_user,
-    group  => $testlink::params::apache_user,
-    mode   => '0755',
+    ensure  => directory,
+    owner   => $testlink::params::apache_user,
+    group   => $testlink::params::apache_user,
+    mode    => '0755',
     require => Exec['unpack-testlink'],
   }
-  
+
   class { 'memcached':
-    max_memory => $max_memory,
-    max_connections => '1024',
+    max_memory      => $max_memory,
+    max_connections => 1024,
   }
-} 
+}
